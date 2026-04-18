@@ -6,7 +6,7 @@ class Config:
     def __init__(self):
         self.t_start = 0
         self.t_end = 100
-        self.n_steps = 20000
+        self.n_steps = 200
         self.eps = 1e-8
 
         self.masses = [0, 0, 0]
