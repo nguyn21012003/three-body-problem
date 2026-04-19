@@ -329,9 +329,9 @@ def generate_proximity_heatmap(cfg):
         writer_fa = csv.DictWriter(fa, fieldnames=header)
         writer_fa.writeheader()
 
-        for i, vx in enumerate(vx1_range):
-            for j, vy in enumerate(vy1_range):
-                writer_fa.writerow({"vx": vx, "vy": vy, "log_d": heatmap_data[i, j]})
+        for i, x in enumerate(x_range):
+            for j, y in enumerate(y_range):
+                writer_fa.writerow({"vx": x, "vy": y, "log_d": heatmap_data[i, j]})
             fa.write("\n")
     return True
 
