@@ -214,8 +214,6 @@ def solve_eq(cond_a, cond_b, n_steps, dt, t_start, masses):
         sol_b[:, i] = sb
         # Lyabunov exp calc
         delta_d = np.linalg.norm(sa - sb)
-        if delta_d == 0:
-            continue
 
         ln_deltas[i - 1] = np.log(delta_d)
         lambdas[i - 1] = np.log(delta_d / delta_0) / t_points[i]
