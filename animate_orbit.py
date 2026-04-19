@@ -1,10 +1,13 @@
 import csv
+from datetime import datetime
 from pathlib import Path
+from time import time
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation
 from numba import jit, prange
+from numba.core.decorators import njit
 
 # from scipy.integrate import solve_ivp
 from tqdm import tqdm
@@ -74,7 +77,7 @@ def rk4(t, S, dt, mass):
     k3 = system_odes(t + dt / 2, S + (dt / 2) * k2, mass)
     k4 = system_odes(t + dt, S + dt * k3, mass)
 
-    return (dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
+    return S + (dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
 
 
 def params_out(filename, planets):
@@ -102,8 +105,8 @@ def params_out(filename, planets):
 def save_results(sol_a, sol_b, t_points, ln_deltas, lamb, eps):
 
     with (
-        open(f"./sol_ic_A.txt", "w", newline="") as fa,
-        open(f"./sol_ic_B.txt", "w", newline="") as fb,
+        open("./sol_ic_A.txt", "w", newline="") as fa,
+        open("./sol_ic_B.txt", "w", newline="") as fb,
     ):
         header = [
             "t",
@@ -164,9 +167,20 @@ def save_results(sol_a, sol_b, t_points, ln_deltas, lamb, eps):
     return True
 
 
-def return_proximity_function(X, X0):
-
-    return np.linalg.norm(X - X0)
+@njit
+def _return_proximity_function(X0, Xi, Xi1):
+    v = Xi1 - Xi  # X_{i+1} - X_i
+    w = X0 - Xi  # X_0 - X_i
+    v_norm_sq = np.dot(v, v)
+    if v_norm_sq > 1e-18:
+        a = np.dot(v, w) / v_norm_sq
+        if 0.0 < a < 1.0:
+            d = np.linalg.norm(w - a * v)
+        else:
+            d = np.linalg.norm(w)
+    else:
+        d = np.linalg.norm(w)
+    return d
 
 
 @jit(nopython=False)
@@ -181,77 +195,115 @@ def solve_eq(cond_a, cond_b, n_steps, dt, t_start, masses):
     X0 = cond_a.copy()
     sa = cond_a.copy()
     sb = cond_b.copy()
-    delta0 = np.linalg.norm(sa - sb)
+    delta_0 = np.linalg.norm(sa - sb)  # Start calculate delta_0 at initial condition
     S_sum = 0.0
     ln_deltas = np.zeros(n_steps - 1)
     lambdas = np.zeros(n_steps - 1)
     proximity_list = np.zeros(n_steps - 1)
     for i in range(1, n_steps):
         t = t_points[i - 1]
-        Xi = sa.copy()
-        sa += rk4(t, sa, dt, masses)
-        sb += rk4(t, sb, dt, masses)
+        Xi = sa.copy()  # Start proximity
+        sa = rk4(t, sa, dt, masses)
+        sb = rk4(t, sb, dt, masses)
         Xi1 = sa.copy()
 
-        # Khoảng cách điểm đến đoạn thẳng Xi -> Xi1
-        v = Xi1 - Xi  # X_{i+1} - X_i
-        w = X0 - Xi  # X_0 - X_i
-        v_norm_sq = np.dot(v, v)
-        if v_norm_sq > 1e-20:
-            a = np.dot(v, w) / v_norm_sq
-            if 0.0 < a < 1.0:
-                d = np.linalg.norm(w - a * v)
-            else:
-                d = np.linalg.norm(w)
-        else:
-            d = np.linalg.norm(w)
-        proximity_list[i - 1] = d
+        d = _return_proximity_function(X0, Xi, Xi1)
+        proximity_list[i - 1] = d  # End proximity
 
-        delta_d = np.linalg.norm(sa - sb)
-        S_sum += np.log((delta_d + 1e-20) / (delta0 + 1e-20))
         sol_a[:, i] = sa
         sol_b[:, i] = sb
-        ln_deltas[i - 1] = np.log(delta_d + 1e-20)
-        lambdas[i - 1] = S_sum / t_points[i]
+        # Lyabunov exp calc
+        delta_d = np.linalg.norm(sa - sb)
+        if delta_d == 0:
+            continue
+
+        ln_deltas[i - 1] = np.log(delta_d)
+        lambdas[i - 1] = np.log(delta_d / delta_0) / t_points[i]
 
     return sol_a, sol_b, t_points, ln_deltas, lambdas, proximity_list
 
 
 @jit(parallel=True, nopython=True)
-def compute_heatmap_matrix(vx1_range, vy1_range, n_steps, dt, t_start, masses_arr):
+def compute_heatmap_velocity_matrix(
+    vx1_range, vy1_range, n_steps, dt, t_start, masses_arr
+):
     nx = len(vx1_range)
     ny = len(vy1_range)
     result_matrix = np.zeros((nx, ny))
 
-    pos = np.empty(9)
-    pos[0] = 1.0
-    pos[1] = 0.0
-    pos[2] = 0.0
-    pos[3] = -1.0
-    pos[4] = 0.0
-    pos[5] = 0.0
-    pos[6] = 0.0
-    pos[7] = 0.0
-    pos[8] = 0.0
+    # pos = np.empty(9)
+    # pos[0] = 1.0
+    # pos[1] = 0.0
+    # pos[2] = 0.0
+    # pos[3] = -1.0
+    # pos[4] = 0.0
+    # pos[5] = 0.0
+    # pos[6] = 0.0
+    # pos[7] = 0.0
+    # pos[8] = 0.0
+    pos = np.array([1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-    for i in prange(nx):
+    for i in prange(nx):  # type: ignore
         vx1 = vx1_range[i]
         for j in range(ny):
             vy1 = vy1_range[j]
 
             ca = np.zeros(18)
-            cb = ca.copy()
-            cb[0] += 1e-10
             ca[0:9] = pos
             ca[9], ca[10] = vx1, vy1  # v1
             ca[12], ca[13] = vx1, vy1  # v2
             ca[15], ca[16] = -2.0 * vx1, -2.0 * vy1  # v3
 
             _, _, _, _, _, proximity_list = solve_eq(
+                ca, ca, n_steps, dt, t_start, masses_arr
+            )
+
+            d_min = np.min(proximity_list[3:])
+            result_matrix[i, j] = -np.log10(d_min + 1e-15)
+
+    return result_matrix
+
+
+@jit(parallel=True, nopython=True)
+def compute_heatmap_position_matrix(x_range, y_range, n_steps, dt, t_start, masses_arr):
+    nx = len(x_range)
+    ny = len(y_range)
+    result_matrix = np.zeros((nx, ny))
+
+    for i in prange(nx):  # type: ignore
+        px = x_range[i]
+        for j in range(ny):
+            py = y_range[j]
+            if (px == 0.0 and py == 0.0) or (px == 1.0 and py == 0.0):
+                result_matrix[i, j] = 0.0
+                continue
+
+            ca = np.zeros(18)
+
+            # Body 1: p2 = (1, 0, 0)
+            ca[0] = 0.0
+            ca[1] = 0.0
+            ca[2] = 0.0
+
+            # Body 2: p2 = (1, 0, 0)
+            ca[3] = 1.0
+            ca[4] = 0.0
+            ca[5] = 0.0
+
+            # Body 3: p3 = (x, y, 0)
+            ca[6] = px
+            ca[7] = py
+            ca[8] = 0.0
+
+            ca[9:18] = 0.0
+            cb = ca.copy()
+            cb += 1e-1
+
+            _, _, _, _, _, proximity_list = solve_eq(
                 ca, cb, n_steps, dt, t_start, masses_arr
             )
 
-            d_min = np.min(proximity_list[1:])
+            d_min = np.min(proximity_list[3:])
             result_matrix[i, j] = -np.log10(d_min + 1e-15)
 
     return result_matrix
@@ -263,8 +315,15 @@ def generate_proximity_heatmap(cfg):
     masses_arr = np.array(cfg.masses, dtype=np.float64)
 
     print("Starting Parallel Scan...")
-    heatmap_data = compute_heatmap_matrix(
-        vx1_range, vy1_range, cfg.n_steps, cfg.dt, cfg.t_start, masses_arr
+    # heatmap_data = compute_heatmap_velocity_matrix(
+    #     vx1_range, vy1_range, cfg.n_steps, cfg.dt, cfg.t_start, masses_arr
+    # )
+
+    x_range = np.linspace(-0.5, 1.5, 100)
+    y_range = np.linspace(-1.0, 1.0, 400)
+
+    heatmap_data = compute_heatmap_position_matrix(
+        x_range, y_range, cfg.n_steps, cfg.dt, cfg.t_start, masses_arr
     )
 
     with open("heatmap.csv", "w", newline="") as fa:
@@ -279,7 +338,12 @@ def generate_proximity_heatmap(cfg):
     return True
 
 
+# TODO: Tinh lai perturbation len mass -> Lyabunov cho cai mass -> so sanh voi Lyabunov cua cai khac
 def main():
+    time_start = time()
+    dt = datetime.fromtimestamp(time_start)
+    print(dt.strftime("%d-%m-%Y %H:%M:%S"))
+
     cfg = Config()
     cfg.load_from_txt("./IC/ic1.txt")
     cond_a, cond_b, planets_info = cfg.setup_systems()
@@ -291,6 +355,14 @@ def main():
     generate_proximity_heatmap(cfg)
     # --- File Output ---
     save_results(sol_a, sol_b, t_points, ln_deltas, lambdas, cfg.eps)
+
+    time_end = time()
+    elapsed = int(time_end - time_start)
+    hours = elapsed // 3600
+    minutes = (elapsed % 3600) // 60
+    seconds = elapsed % 60
+
+    print(f"Run time: {hours:02d}:{minutes:02d}:{seconds:02d}")
 
     fig = plt.figure(figsize=(12, 6))
     ax1 = fig.add_subplot(121, projection="3d")
