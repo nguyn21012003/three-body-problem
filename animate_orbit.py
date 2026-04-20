@@ -196,9 +196,10 @@ def solve_eq(cond_a, cond_b, n_steps, dt, t_start, masses):
     sa = cond_a.copy()
     sb = cond_b.copy()
     delta_0 = np.linalg.norm(sa - sb)  # Start calculate delta_0 at initial condition
-    S_sum = 0.0
+
     ln_deltas = np.zeros(n_steps - 1)
     lambdas = np.zeros(n_steps - 1)
+    sensi_arr = np.zeros(n_steps - 1)
     proximity_list = np.zeros(n_steps - 1)
     for i in range(1, n_steps):
         t = t_points[i - 1]
@@ -215,10 +216,14 @@ def solve_eq(cond_a, cond_b, n_steps, dt, t_start, masses):
         # Lyabunov exp calc
         delta_d = np.linalg.norm(sa - sb)
 
+        # sensitivity
+        cond_ab = np.linalg.norm(cond_a - cond_b)
+
+        sensi_arr[i - 1] = np.log(delta_d / cond_ab)
         ln_deltas[i - 1] = np.log(delta_d)
         lambdas[i - 1] = np.log(delta_d / delta_0) / t_points[i]
 
-    return sol_a, sol_b, t_points, ln_deltas, lambdas, proximity_list
+    return sol_a, sol_b, t_points, ln_deltas, lambdas, proximity_list, sensi_arr
 
 
 @jit(parallel=True, nopython=True)
@@ -252,7 +257,7 @@ def compute_heatmap_velocity_matrix(
             ca[12], ca[13] = vx1, vy1  # v2
             ca[15], ca[16] = -2.0 * vx1, -2.0 * vy1  # v3
 
-            _, _, _, _, _, proximity_list = solve_eq(
+            _, _, _, _, _, proximity_list, _ = solve_eq(
                 ca, ca, n_steps, dt, t_start, masses_arr
             )
 
@@ -272,32 +277,42 @@ def compute_heatmap_position_matrix(x_range, y_range, n_steps, dt, t_start, mass
         px = x_range[i]
         for j in range(ny):
             py = y_range[j]
-
             ca = np.zeros(18)
-
-            # Body 1: p2 = (1, 0, 0)
-            ca[0] = 0.0
-            ca[1] = 0.0
+            ca[0] = px
+            ca[1] = py
             ca[2] = 0.0
 
-            # Body 2: p2 = (1, 0, 0)
-            ca[3] = 1.0
+            # Body 2: p2 = (0, 0, 0)
+            ca[3] = 0.0
             ca[4] = 0.0
             ca[5] = 0.0
 
-            # Body 3: p3 = (x, y, 0)
-            ca[6] = px
-            ca[7] = py
+            # Body 3: p3 = (10, 10, 12)
+            ca[6] = 1.0
+            ca[7] = 1.0
             ca[8] = 0.0
 
-            ca[9:18] = 0.0
+            # ===== VELOCITY =====
+            # v1 = (-3, 0, 0)
+            ca[9] = -1.0
+            ca[10] = 0.0
+            ca[11] = 0.0
+
+            # v2 = (0, 0, 0)
+            ca[12] = 0.0
+            ca[13] = 0.0
+            ca[14] = 0.0
+
+            # v3 = (3, 0, 0)
+            ca[15] = 1.0
+            ca[16] = 0.0
+            ca[17] = 0.0
+
             cb = ca.copy()
             cb += 1e-1
-
-            _, _, _, _, _, proximity_list = solve_eq(
+            _, _, _, _, _, proximity_list, _ = solve_eq(
                 ca, cb, n_steps, dt, t_start, masses_arr
             )
-
             d_min = np.min(proximity_list[3:])
             result_matrix[i, j] = -np.log10(d_min + 1e-15)
 
@@ -321,15 +336,15 @@ def generate_proximity_heatmap(cfg):
         x_range, y_range, cfg.n_steps, cfg.dt, cfg.t_start, masses_arr
     )
 
-    with open("heatmap.csv", "w", newline="") as fa:
+    with open("proximity.csv", "w", newline="") as f_prox:
         header = ["vx", "vy", "log_d"]
-        writer_fa = csv.DictWriter(fa, fieldnames=header)
+        writer_fa = csv.DictWriter(f_prox, fieldnames=header)
         writer_fa.writeheader()
 
         for i, x in enumerate(x_range):
             for j, y in enumerate(y_range):
                 writer_fa.writerow({"vx": x, "vy": y, "log_d": heatmap_data[i, j]})
-            fa.write("\n")
+            f_prox.write("\n")
     return True
 
 
@@ -340,14 +355,14 @@ def main():
     print(dt.strftime("%d-%m-%Y %H:%M:%S"))
 
     cfg = Config()
-    cfg.load_from_txt("./IC/ic1.txt")
+    cfg.load_from_txt("./IC/ic11.txt")
     cond_a, cond_b, planets_info = cfg.setup_systems()
 
     masses_arr = np.array(cfg.masses, dtype=np.float64)
-    sol_a, sol_b, t_points, ln_deltas, lambdas, _ = solve_eq(
+    sol_a, sol_b, t_points, ln_deltas, lambdas, _, _ = solve_eq(
         cond_a, cond_b, cfg.n_steps, cfg.dt, cfg.t_start, masses_arr
     )
-    generate_proximity_heatmap(cfg)
+    # generate_proximity_heatmap(cfg)
     # --- File Output ---
     save_results(sol_a, sol_b, t_points, ln_deltas, lambdas, cfg.eps)
 
@@ -411,8 +426,8 @@ def main():
 
         return all_plots
 
-    # ani = FuncAnimation(fig, animate, frames=cfg.n_steps, interval=20)
-    # plt.show()
+    ani = FuncAnimation(fig, animate, frames=cfg.n_steps, interval=20)
+    plt.show()
 
 
 if __name__ == "__main__":
