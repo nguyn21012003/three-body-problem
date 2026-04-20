@@ -272,9 +272,6 @@ def compute_heatmap_position_matrix(x_range, y_range, n_steps, dt, t_start, mass
         px = x_range[i]
         for j in range(ny):
             py = y_range[j]
-            if (px == 0.0 and py == 0.0) or (px == 1.0 and py == 0.0):
-                result_matrix[i, j] = 0.0
-                continue
 
             ca = np.zeros(18)
 
