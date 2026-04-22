@@ -77,7 +77,7 @@ def rk4(t, S, dt, mass):
     k3 = system_odes(t + dt / 2, S + (dt / 2) * k2, mass)
     k4 = system_odes(t + dt, S + dt * k3, mass)
 
-    return S + (dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
+    return (dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
 
 
 def params_out(filename, planets):
@@ -199,13 +199,12 @@ def solve_eq(cond_a, cond_b, n_steps, dt, t_start, masses):
 
     ln_deltas = np.zeros(n_steps - 1)
     lambdas = np.zeros(n_steps - 1)
-    sensi_arr = np.zeros(n_steps - 1)
     proximity_list = np.zeros(n_steps - 1)
     for i in range(1, n_steps):
         t = t_points[i - 1]
         Xi = sa.copy()  # Start proximity
-        sa = rk4(t, sa, dt, masses)
-        sb = rk4(t, sb, dt, masses)
+        sa += rk4(t, sa, dt, masses)
+        sb += rk4(t, sb, dt, masses)
         Xi1 = sa.copy()
 
         d = _return_proximity_function(X0, Xi, Xi1)
@@ -216,14 +215,10 @@ def solve_eq(cond_a, cond_b, n_steps, dt, t_start, masses):
         # Lyabunov exp calc
         delta_d = np.linalg.norm(sa - sb)
 
-        # sensitivity
-        cond_ab = np.linalg.norm(cond_a - cond_b)
-
-        sensi_arr[i - 1] = np.log(delta_d / cond_ab)
         ln_deltas[i - 1] = np.log(delta_d)
         lambdas[i - 1] = np.log(delta_d / delta_0) / t_points[i]
 
-    return sol_a, sol_b, t_points, ln_deltas, lambdas, proximity_list, sensi_arr
+    return sol_a, sol_b, t_points, ln_deltas, lambdas, proximity_list
 
 
 @jit(parallel=True, nopython=True)
@@ -257,7 +252,7 @@ def compute_heatmap_velocity_matrix(
             ca[12], ca[13] = vx1, vy1  # v2
             ca[15], ca[16] = -2.0 * vx1, -2.0 * vy1  # v3
 
-            _, _, _, _, _, proximity_list, _ = solve_eq(
+            _, _, _, _, _, proximity_list = solve_eq(
                 ca, ca, n_steps, dt, t_start, masses_arr
             )
 
@@ -294,7 +289,7 @@ def compute_heatmap_position_matrix(x_range, y_range, n_steps, dt, t_start, mass
 
             # ===== VELOCITY =====
             # v1 = (-3, 0, 0)
-            ca[9] = -1.0
+            ca[9] = -3.0
             ca[10] = 0.0
             ca[11] = 0.0
 
@@ -304,13 +299,13 @@ def compute_heatmap_position_matrix(x_range, y_range, n_steps, dt, t_start, mass
             ca[14] = 0.0
 
             # v3 = (3, 0, 0)
-            ca[15] = 1.0
+            ca[15] = 3.0
             ca[16] = 0.0
             ca[17] = 0.0
 
             cb = ca.copy()
             cb += 1e-1
-            _, _, _, _, _, proximity_list, _ = solve_eq(
+            _, _, _, _, _, proximity_list = solve_eq(
                 ca, cb, n_steps, dt, t_start, masses_arr
             )
             d_min = np.min(proximity_list[3:])
@@ -325,41 +320,45 @@ def generate_proximity_heatmap(cfg):
     masses_arr = np.array(cfg.masses, dtype=np.float64)
 
     print("Starting Parallel Scan...")
-    # heatmap_data = compute_heatmap_velocity_matrix(
-    #     vx1_range, vy1_range, cfg.n_steps, cfg.dt, cfg.t_start, masses_arr
-    # )
-
-    x_range = np.linspace(-0.5, 1.5, 100)
-    y_range = np.linspace(-1.0, 1.0, 400)
-
-    heatmap_data = compute_heatmap_position_matrix(
-        x_range, y_range, cfg.n_steps, cfg.dt, cfg.t_start, masses_arr
+    heatmap_data = compute_heatmap_velocity_matrix(
+        vx1_range, vy1_range, cfg.n_steps, cfg.dt, cfg.t_start, masses_arr
     )
+
+    # y_range = np.linspace(-1.0, 1.0, 400)
+    # x_range = np.linspace(-0.5, 1.5, 100)
+    #
+    # heatmap_data = compute_heatmap_position_matrix(
+    #     x_range, y_range, cfg.n_steps, cfg.dt, cfg.t_start, masses_arr
+    # )
 
     with open("proximity.csv", "w", newline="") as f_prox:
         header = ["vx", "vy", "log_d"]
         writer_fa = csv.DictWriter(f_prox, fieldnames=header)
         writer_fa.writeheader()
 
-        for i, x in enumerate(x_range):
-            for j, y in enumerate(y_range):
+        for i, x in enumerate(vx1_range):
+            for j, y in enumerate(vy1_range):
                 writer_fa.writerow({"vx": x, "vy": y, "log_d": heatmap_data[i, j]})
             f_prox.write("\n")
     return True
 
 
 # TODO: Tinh lai perturbation len mass -> Lyabunov cho cai mass -> so sanh voi Lyabunov cua cai khac
+
+# NOTE: perturbation cho mass ko hop ly
+
+
 def main():
     time_start = time()
     dt = datetime.fromtimestamp(time_start)
     print(dt.strftime("%d-%m-%Y %H:%M:%S"))
 
     cfg = Config()
-    cfg.load_from_txt("./IC/ic11.txt")
+    cfg.load_from_txt("./IC/ic7.txt")
     cond_a, cond_b, planets_info = cfg.setup_systems()
 
     masses_arr = np.array(cfg.masses, dtype=np.float64)
-    sol_a, sol_b, t_points, ln_deltas, lambdas, _, _ = solve_eq(
+    sol_a, sol_b, t_points, ln_deltas, lambdas, _ = solve_eq(
         cond_a, cond_b, cfg.n_steps, cfg.dt, cfg.t_start, masses_arr
     )
     # generate_proximity_heatmap(cfg)
@@ -426,8 +425,8 @@ def main():
 
         return all_plots
 
-    ani = FuncAnimation(fig, animate, frames=cfg.n_steps, interval=20)
-    plt.show()
+    # ani = FuncAnimation(fig, animate, frames=cfg.n_steps, interval=20)
+    # plt.show()
 
 
 if __name__ == "__main__":
