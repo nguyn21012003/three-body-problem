@@ -251,9 +251,11 @@ def compute_heatmap_velocity_matrix(
             ca[9], ca[10] = vx1, vy1  # v1
             ca[12], ca[13] = vx1, vy1  # v2
             ca[15], ca[16] = -2.0 * vx1, -2.0 * vy1  # v3
+            cb = ca.copy()
+            cb[0] = 1e-5
 
             _, _, _, _, _, proximity_list = solve_eq(
-                ca, ca, n_steps, dt, t_start, masses_arr
+                ca, cb, n_steps, dt, t_start, masses_arr
             )
 
             d_min = np.min(proximity_list[3:])
@@ -331,7 +333,7 @@ def generate_proximity_heatmap(cfg):
     #     x_range, y_range, cfg.n_steps, cfg.dt, cfg.t_start, masses_arr
     # )
 
-    with open("proximity.csv", "w", newline="") as f_prox:
+    with open("heatmap.csv", "w", newline="") as f_prox:
         header = ["vx", "vy", "log_d"]
         writer_fa = csv.DictWriter(f_prox, fieldnames=header)
         writer_fa.writeheader()
@@ -354,14 +356,14 @@ def main():
     print(dt.strftime("%d-%m-%Y %H:%M:%S"))
 
     cfg = Config()
-    cfg.load_from_txt("./IC/ic7.txt")
+    cfg.load_from_txt("./IC/ic1.txt")
     cond_a, cond_b, planets_info = cfg.setup_systems()
 
     masses_arr = np.array(cfg.masses, dtype=np.float64)
     sol_a, sol_b, t_points, ln_deltas, lambdas, _ = solve_eq(
         cond_a, cond_b, cfg.n_steps, cfg.dt, cfg.t_start, masses_arr
     )
-    # generate_proximity_heatmap(cfg)
+    generate_proximity_heatmap(cfg)
     # --- File Output ---
     save_results(sol_a, sol_b, t_points, ln_deltas, lambdas, cfg.eps)
 
