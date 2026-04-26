@@ -103,10 +103,11 @@ def params_out(filename, planets):
 
 
 def save_results(sol_a, sol_b, t_points, ln_deltas, lamb, eps):
+    print(f"./sol_ic1_A_{eps}.txt")
 
     with (
-        open("./sol_ic_A.txt", "w", newline="") as fa,
-        open("./sol_ic_B.txt", "w", newline="") as fb,
+        open(f"./sol_ic1_A_{eps}.txt", "w", newline="") as fa,
+        open(f"./sol_ic1_B_{eps}.txt", "w", newline="") as fb,
     ):
         header = [
             "t",
@@ -210,12 +211,11 @@ def solve_eq(cond_a, cond_b, n_steps, dt, t_start, masses):
         d = _return_proximity_function(X0, Xi, Xi1)
         proximity_list[i - 1] = d  # End proximity
 
+        # Lyabunov exp calc
         sol_a[:, i] = sa
         sol_b[:, i] = sb
-        # Lyabunov exp calc
         delta_d = np.linalg.norm(sa - sb)
-
-        ln_deltas[i - 1] = np.log(delta_d)
+        ln_deltas[i - 1] = -np.log(delta_d)
         lambdas[i - 1] = np.log(delta_d / delta_0) / t_points[i]
 
     return sol_a, sol_b, t_points, ln_deltas, lambdas, proximity_list
@@ -347,7 +347,7 @@ def generate_proximity_heatmap(cfg):
 
 # TODO: Tinh lai perturbation len mass -> Lyabunov cho cai mass -> so sanh voi Lyabunov cua cai khac
 
-# NOTE: perturbation cho mass ko hop ly
+# NOTE: perturbation cho mass la ko hop ly
 
 
 def main():
@@ -356,6 +356,7 @@ def main():
     print(dt.strftime("%d-%m-%Y %H:%M:%S"))
 
     cfg = Config()
+    print(f"dt: {cfg.dt}")
     cfg.load_from_txt("./IC/ic1.txt")
     cond_a, cond_b, planets_info = cfg.setup_systems()
 
@@ -363,7 +364,7 @@ def main():
     sol_a, sol_b, t_points, ln_deltas, lambdas, _ = solve_eq(
         cond_a, cond_b, cfg.n_steps, cfg.dt, cfg.t_start, masses_arr
     )
-    generate_proximity_heatmap(cfg)
+    # generate_proximity_heatmap(cfg)
     # --- File Output ---
     save_results(sol_a, sol_b, t_points, ln_deltas, lambdas, cfg.eps)
 
